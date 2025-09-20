@@ -1,0 +1,176 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { Card } from "@/components/ui/card"
+
+interface BattleArenaProps {
+  concept: string
+  userGroup: string
+  onPitchesComplete: (pitches: { groq: string; openai: string; anthropic: string }) => void
+  readonly?: boolean
+}
+
+interface PitchState {
+  groq: { content: string; isComplete: boolean }
+  openai: { content: string; isComplete: boolean }
+  anthropic: { content: string; isComplete: boolean }
+}
+
+export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = false }: BattleArenaProps) {
+  const [pitches, setPitches] = useState<PitchState>({
+    groq: { content: "", isComplete: false },
+    openai: { content: "", isComplete: false },
+    anthropic: { content: "", isComplete: false },
+  })
+
+  const generatePitch = (aiModel: string) => {
+    const pitchTemplate = `**${concept.toUpperCase()} FOR ${userGroup.toUpperCase()}**
+
+🚀 **The Problem**
+${userGroup} struggle with outdated, inefficient solutions that don't meet their unique needs in today's digital world.
+
+💡 **Our Solution**
+We're building the ${concept} for ${userGroup} - a revolutionary platform that combines the best of ${concept}'s user experience with industry-specific tools tailored for ${userGroup}.
+
+📈 **Go-to-Market**
+Direct outreach to ${userGroup} associations, trade publications, and industry conferences. Freemium model with premium features.
+
+💰 **Monetization**
+- Subscription tiers ($9.99-$99.99/month)
+- Transaction fees (2-5%)
+- Premium features and integrations
+
+🌍 **Total Addressable Market**
+The ${userGroup} market represents a $2.5B opportunity with 500K+ potential users globally.
+
+⚡ **Key Differentiators**
+- Industry-specific features built for ${userGroup}
+- AI-powered recommendations
+- Seamless mobile-first experience
+- 24/7 customer support`
+
+    return pitchTemplate
+  }
+
+  useEffect(() => {
+    if (readonly) {
+      const finalPitches = {
+        groq: { content: generatePitch("groq"), isComplete: true },
+        openai: { content: generatePitch("openai"), isComplete: true },
+        anthropic: { content: generatePitch("anthropic"), isComplete: true },
+      }
+      setPitches(finalPitches)
+      return
+    }
+
+    const models = ["groq", "openai", "anthropic"] as const
+    let completedCount = 0
+
+    models.forEach((model, index) => {
+      setTimeout(() => {
+        const pitch = generatePitch(model)
+        const words = pitch.split(" ")
+        let currentIndex = 0
+
+        const streamInterval = setInterval(
+          () => {
+            if (currentIndex < words.length) {
+              setPitches((prev) => ({
+                ...prev,
+                [model]: {
+                  content: words.slice(0, currentIndex + 1).join(" "),
+                  isComplete: false,
+                },
+              }))
+              currentIndex++
+            } else {
+              clearInterval(streamInterval)
+              setPitches((prev) => ({
+                ...prev,
+                [model]: {
+                  ...prev[model],
+                  isComplete: true,
+                },
+              }))
+
+              completedCount++
+              if (completedCount === 3) {
+                setTimeout(() => {
+                  const finalPitches = {
+                    groq: generatePitch("groq"),
+                    openai: generatePitch("openai"),
+                    anthropic: generatePitch("anthropic"),
+                  }
+                  onPitchesComplete(finalPitches)
+                }, 500)
+              }
+            }
+          },
+          model === "groq" ? 50 : model === "openai" ? 80 : 100,
+        )
+      }, index * 500)
+    })
+  }, [readonly]) // Added readonly to dependencies
+
+  const aiModels = [
+    { key: "groq", name: "LLAMA 3.3", color: "cyan", icon: "⚡" },
+    { key: "openai", name: "GPT-4o", color: "emerald", icon: "⬢" },
+    { key: "anthropic", name: "SONNET 4", color: "orange", icon: "▲" },
+  ] as const
+
+  return (
+    <div className="space-y-4">
+      {readonly && (
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-bold text-purple-400 mb-2">📋 PITCH REVIEW</h2>
+          <p className="text-gray-300">Review the AI-generated startup pitches below</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
+        {aiModels.map(({ key, name, color, icon }) => (
+          <Card key={key} className={`bg-black/40 backdrop-blur-sm border-${color}-400/50 p-6 overflow-hidden`}>
+            {/* Header */}
+            <div className={`flex items-center gap-3 mb-4 pb-3 border-b border-${color}-400/30`}>
+              <span className="text-2xl">{icon}</span>
+              <div>
+                <h3 className={`text-${color}-400 font-bold text-lg`}>{name}</h3>
+                <div className="text-xs text-gray-400">
+                  {pitches[key].isComplete ? "PITCH COMPLETE" : "GENERATING..."}
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="text-sm text-gray-200 leading-relaxed overflow-y-auto max-h-80">
+              {pitches[key].content ? (
+                <div className="whitespace-pre-line">
+                  {pitches[key].content}
+                  {!pitches[key].isComplete && <span className="animate-pulse">|</span>}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-gray-400">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
+                  </div>
+                  <span>Thinking...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Progress Bar */}
+            <div className={`mt-4 h-1 bg-gray-700 rounded-full overflow-hidden`}>
+              <div
+                className={`h-full bg-${color}-400 transition-all duration-300 ${
+                  pitches[key].isComplete ? "w-full" : "w-3/4 animate-pulse"
+                }`}
+              />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
