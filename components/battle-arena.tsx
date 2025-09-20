@@ -25,7 +25,6 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
   })
   
   const abortControllersRef = useRef<Map<AIProvider, AbortController>>(new Map())
-  const completedCountRef = useRef(0)
 
 
   // Stream content from API
@@ -98,8 +97,7 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
               }
             }))
             
-            completedCountRef.current += 1
-            checkAllComplete()
+            setTimeout(checkAllComplete, 100)
           }
         }, provider === "groq" ? 50 : provider === "openai" ? 80 : 100)
         
@@ -240,8 +238,7 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
           }
         }))
         
-        completedCountRef.current += 1
-        checkAllComplete()
+        setTimeout(checkAllComplete, 100)
       }
     }
   }, [concept, userGroup])
@@ -253,11 +250,19 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
       const allComplete = currentPitches.groq.isComplete && 
                          currentPitches.openai.isComplete && 
                          currentPitches.anthropic.isComplete
-      const allHaveContent = currentPitches.groq.content.length > 0 && 
-                            currentPitches.openai.content.length > 0 && 
-                            currentPitches.anthropic.content.length > 0
       
-      if (allComplete && allHaveContent) {
+      // More robust content validation - check for meaningful pitch content
+      const hasRealContent = (content: string) => {
+        return content.length > 200 && // At least 200 chars
+               content.includes('**') && // Has formatting 
+               (content.includes('Problem') || content.includes('Solution') || content.includes('Market')) // Has pitch sections
+      }
+      
+      const allHaveRealContent = hasRealContent(currentPitches.groq.content) && 
+                                hasRealContent(currentPitches.openai.content) && 
+                                hasRealContent(currentPitches.anthropic.content)
+      
+      if (allComplete && allHaveRealContent) {
         const finalPitches = {
           groq: currentPitches.groq.content,
           openai: currentPitches.openai.content,
@@ -307,9 +312,6 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
       return
     }
 
-    // Reset completed count (no longer needed but keeping for potential future use)
-    completedCountRef.current = 0
-    
     // Start streaming for all providers with staggered delays
     const models: AIProvider[] = ["groq", "openai", "anthropic"]
     

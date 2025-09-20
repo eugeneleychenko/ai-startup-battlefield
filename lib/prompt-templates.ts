@@ -192,13 +192,15 @@ SCORING GUIDELINES:
 REQUIRED OUTPUT FORMAT (valid JSON only):
 {
   "scores": {
-    "groq": [1-10 integer],
-    "openai": [1-10 integer], 
-    "anthropic": [1-10 integer]
+    "groq": 6,
+    "openai": 8, 
+    "anthropic": 7
   },
-  "winner": "[groq|openai|anthropic]",
+  "winner": "openai",
   "reasoning": "[Provide a comprehensive 1-paragraph analysis (4-6 sentences) that: 1) Briefly summarizes the key strengths and weaknesses of each pitch, 2) Explicitly contrasts their different approaches to market positioning, solution design, or go-to-market strategy, 3) Clearly explains why the winning pitch was superior - was it more realistic market analysis, better monetization strategy, stronger competitive advantage, or more compelling execution plan? 4) Mention specific elements from the pitches that influenced your decision.]"
 }
+
+CRITICAL: Each score MUST be a single integer from 1-10, NOT an array. Example: "groq": 6 (correct), NOT "groq": [6, 7, 8] (incorrect).
 
 ANALYSIS REQUIREMENTS:
 - Compare all three pitches directly against each other
