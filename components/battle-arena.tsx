@@ -27,37 +27,6 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
   const abortControllersRef = useRef<Map<AIProvider, AbortController>>(new Map())
   const completedCountRef = useRef(0)
 
-  // Fallback pitch template for readonly mode or errors
-  const generateFallbackPitch = (aiModel: string) => {
-    const pitchTemplate = `**${concept.toUpperCase()} FOR ${userGroup.toUpperCase()}**
-
-🚀 **The Problem**
-Current solutions in the market lack the specialized features and user experience that ${userGroup} specifically need to achieve their goals efficiently.
-
-💡 **Our Solution**
-${concept} for ${userGroup} - a purpose-built platform that addresses the unique workflows and challenges faced by ${userGroup} in their daily operations.
-
-📈 **Go-to-Market**
-• Direct partnerships with ${userGroup} communities and organizations
-• Content marketing through industry publications and events
-• Freemium model with premium enterprise features
-
-💰 **Monetization**
-• SaaS subscription tiers based on team size and features
-• Usage-based pricing for high-volume customers
-• Professional services and training programs
-
-🌍 **Total Addressable Market**
-Growing market segment with strong demand for specialized tools that enhance productivity and user experience for ${userGroup}.
-
-⚡ **Key Differentiators**
-• Built specifically for ${userGroup} workflows
-• AI-enhanced features for improved efficiency
-• Intuitive interface designed for rapid adoption
-• Comprehensive support and onboarding`
-
-    return pitchTemplate
-  }
 
   // Stream content from API
   const streamPitch = useCallback(async (provider: AIProvider, retryCount = 0) => {
@@ -101,7 +70,7 @@ Growing market segment with strong demand for specialized tools that enhance pro
       if (contentType?.includes('application/json')) {
         // Non-streaming response
         const data = await response.json()
-        const content = data.pitch || data.content || generateFallbackPitch(provider)
+        const content = data.pitch || data.content || 'No content received from API'
         
         // Simulate streaming for consistent UX
         const words = content.split(" ")
@@ -145,6 +114,20 @@ Growing market segment with strong demand for specialized tools that enhance pro
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let accumulatedContent = ""
+      let updateCounter = 0
+      let groqStreamFinished = false
+
+      // Debounced update function to reduce UI twitching
+      const updateUI = () => {
+        setPitches(prev => ({
+          ...prev,
+          [provider]: {
+            ...prev[provider],
+            content: accumulatedContent,
+            isRetrying: false
+          }
+        }))
+      }
 
       while (true) {
         const { done, value } = await reader.read()
@@ -165,8 +148,9 @@ Growing market segment with strong demand for specialized tools that enhance pro
                   if (data.type === 'text' && data.content) {
                     accumulatedContent += data.content
                   } else if (data.type === 'done') {
-                    // Stream completed, exit the read loop
-                    return
+                    // Mark stream as finished; break out and allow finalization below
+                    groqStreamFinished = true
+                    break
                   } else if (data.type === 'error') {
                     throw new Error(data.error || 'Streaming error')
                   }
@@ -181,25 +165,25 @@ Growing market segment with strong demand for specialized tools that enhance pro
               }
             }
           }
+          if (groqStreamFinished) {
+            break
+          }
         } else {
           // For OpenAI and Anthropic - treat as raw text stream
           accumulatedContent += chunk
         }
         
-        // Update state with accumulated content
-        setPitches(prev => ({
-          ...prev,
-          [provider]: {
-            ...prev[provider],
-            content: accumulatedContent,
-            isRetrying: false
-          }
-        }))
-        
-        // Add realistic delay based on provider speed
-        const delay = provider === "groq" ? 50 : provider === "openai" ? 80 : 100
-        await new Promise(resolve => setTimeout(resolve, delay))
+        // Update UI every 5 chunks or every 100ms to reduce twitching
+        updateCounter++
+        if (updateCounter % 5 === 0) {
+          updateUI()
+          // Small delay to prevent overwhelming the UI thread
+          await new Promise(resolve => setTimeout(resolve, 16)) // ~60fps
+        }
       }
+
+      // Final update to ensure all content is displayed
+      updateUI()
 
       // Mark as complete
       setPitches(prev => ({
@@ -211,9 +195,8 @@ Growing market segment with strong demand for specialized tools that enhance pro
         }
       }))
 
-      // Increment completed count and check if all done
-      completedCountRef.current += 1
-      checkAllComplete()
+      // Check if all done (will be called via useEffect when state updates)
+      setTimeout(checkAllComplete, 100)
 
     } catch (error: any) {
       console.error(`Error generating pitch for ${provider}:`, error)
@@ -247,11 +230,11 @@ Growing market segment with strong demand for specialized tools that enhance pro
           streamPitch(provider, retryCount + 1)
         }, delay)
       } else {
-        // Use fallback content after max retries
+        // Mark as failed after max retries
         setPitches(prev => ({
           ...prev,
           [provider]: {
-            content: generateFallbackPitch(provider),
+            content: '',
             isComplete: true,
             error: apiError
           }
@@ -263,29 +246,32 @@ Growing market segment with strong demand for specialized tools that enhance pro
     }
   }, [concept, userGroup])
 
-  // Check if all pitches are complete
+  // Check if all pitches are complete and send immediately
   const checkAllComplete = useCallback(() => {
-    if (completedCountRef.current === 3) {
-      setTimeout(() => {
-        const currentPitches = pitches
+    if (!readonly) {
+      const currentPitches = pitches
+      const allComplete = currentPitches.groq.isComplete && 
+                         currentPitches.openai.isComplete && 
+                         currentPitches.anthropic.isComplete
+      const allHaveContent = currentPitches.groq.content.length > 0 && 
+                            currentPitches.openai.content.length > 0 && 
+                            currentPitches.anthropic.content.length > 0
+      
+      if (allComplete && allHaveContent) {
         const finalPitches = {
-          groq: currentPitches.groq.content || generateFallbackPitch("groq"),
-          openai: currentPitches.openai.content || generateFallbackPitch("openai"),
-          anthropic: currentPitches.anthropic.content || generateFallbackPitch("anthropic"),
+          groq: currentPitches.groq.content,
+          openai: currentPitches.openai.content,
+          anthropic: currentPitches.anthropic.content,
         }
         onPitchesComplete(finalPitches)
-      }, 500)
+      }
     }
-  }, [pitches, onPitchesComplete])
+  }, [pitches, onPitchesComplete, readonly])
 
   // Manual retry function
   const retryPitch = useCallback((provider: AIProvider) => {
-    // Reset completed count if retrying
-    if (pitches[provider].isComplete) {
-      completedCountRef.current -= 1
-    }
     streamPitch(provider, 0)
-  }, [streamPitch, pitches])
+  }, [streamPitch])
 
   useEffect(() => {
     // Cleanup function
@@ -299,16 +285,29 @@ Growing market segment with strong demand for specialized tools that enhance pro
 
   useEffect(() => {
     if (readonly) {
-      const finalPitches = {
-        groq: { content: generateFallbackPitch("groq"), isComplete: true },
-        openai: { content: generateFallbackPitch("openai"), isComplete: true },
-        anthropic: { content: generateFallbackPitch("anthropic"), isComplete: true },
-      }
-      setPitches(finalPitches)
+      // In readonly mode, don't overwrite existing content if we have it
+      setPitches(prev => {
+        const hasContent = prev.groq.content || prev.openai.content || prev.anthropic.content
+        if (hasContent) {
+          // If we already have content, just mark everything as complete
+          return {
+            groq: { ...prev.groq, isComplete: true },
+            openai: { ...prev.openai, isComplete: true },
+            anthropic: { ...prev.anthropic, isComplete: true },
+          }
+        } else {
+          // If no content exists, show loading state
+          return {
+            groq: { content: "Loading previous content...", isComplete: false },
+            openai: { content: "Loading previous content...", isComplete: false },
+            anthropic: { content: "Loading previous content...", isComplete: false },
+          }
+        }
+      })
       return
     }
 
-    // Reset completed count
+    // Reset completed count (no longer needed but keeping for potential future use)
     completedCountRef.current = 0
     
     // Start streaming for all providers with staggered delays
@@ -373,7 +372,7 @@ Growing market segment with strong demand for specialized tools that enhance pro
             </div>
 
             {/* Content */}
-            <div className="text-sm text-gray-200 leading-relaxed overflow-y-auto max-h-80">
+            <div className="text-sm text-gray-200 leading-relaxed overflow-y-auto max-h-80 transition-all duration-75 ease-out whitespace-pre-wrap break-words">
               {pitches[key].error && !pitches[key].content ? (
                 <div className="text-red-400 text-center py-4">
                   <div className="mb-2">⚠️ Generation Failed</div>

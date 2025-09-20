@@ -147,11 +147,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<JudgeResp
 
     // Generate judgment using Anthropic Claude Opus
     const result = await generateText({
-      model: anthropic('claude-3-opus-20240229'),
+      model: anthropic('claude-opus-4-20250514'),
       prompt,
       temperature: 0.3,
-      maxCompletionTokens: 1024,
       topP: 0.9,
+      maxOutputTokens: 1024,
     });
 
     // Parse the response

@@ -10,37 +10,93 @@ interface JudgeVerdictProps {
     openai: string
     anthropic: string
   }
+  concept: string
+  userGroup: string
   onReset: () => void
 }
 
-export function JudgeVerdict({ pitches, onReset }: JudgeVerdictProps) {
+export function JudgeVerdict({ pitches, concept, userGroup, onReset }: JudgeVerdictProps) {
   const [scores, setScores] = useState<{ groq: number; openai: number; anthropic: number } | null>(null)
   const [winner, setWinner] = useState<string | null>(null)
+  const [reasoning, setReasoning] = useState<string | null>(null)
   const [showVerdict, setShowVerdict] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const hasInitialized = useRef(false)
 
   useEffect(() => {
     if (hasInitialized.current) return
     hasInitialized.current = true
 
-    // Simulate judging process
-    setTimeout(() => {
-      const newScores = {
-        groq: Math.floor(Math.random() * 3) + 8, // 8-10
-        openai: Math.floor(Math.random() * 3) + 7, // 7-9
-        anthropic: Math.floor(Math.random() * 3) + 7, // 7-9
+    // Actually call the judge API
+    const callJudgeAPI = async () => {
+      // Debug: Judge received pitches
+      console.log('🏛️ Judge received pitches:', {
+        groq: pitches.groq.length,
+        openai: pitches.openai.length,
+        anthropic: pitches.anthropic.length,
+        concept,
+        userGroup
+      })
+      
+      try {
+        const response = await fetch('/api/judge', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            concept,
+            userGroup,
+            pitches
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`Judge API error: ${response.status}`)
+        }
+
+        const judgeResult = await response.json()
+        
+        // Extract scores from judge response
+        const newScores = {
+          groq: judgeResult.scores.groq.score,
+          openai: judgeResult.scores.openai.score,
+          anthropic: judgeResult.scores.anthropic.score,
+        }
+
+        setScores(newScores)
+        setReasoning(judgeResult.scores.groq.reasoning) // Use the reasoning from judge
+        
+        // Determine winner from judge response
+        const maxScore = Math.max(newScores.groq, newScores.openai, newScores.anthropic)
+        const winnerKey = Object.entries(newScores).find(([_, score]) => score === maxScore)?.[0]
+        setWinner(winnerKey || "groq")
+
+        setTimeout(() => setShowVerdict(true), 1000)
+      } catch (err) {
+        console.error('Judge API call failed:', err)
+        setError(err instanceof Error ? err.message : 'Unknown error')
+        
+        // Fallback to random scores if API fails
+        const fallbackScores = {
+          groq: Math.floor(Math.random() * 3) + 8,
+          openai: Math.floor(Math.random() * 3) + 7,
+          anthropic: Math.floor(Math.random() * 3) + 7,
+        }
+        setScores(fallbackScores)
+        setReasoning("Judge API unavailable - using fallback scoring")
+        
+        const maxScore = Math.max(fallbackScores.groq, fallbackScores.openai, fallbackScores.anthropic)
+        const winnerKey = Object.entries(fallbackScores).find(([_, score]) => score === maxScore)?.[0]
+        setWinner(winnerKey || "groq")
+        
+        setTimeout(() => setShowVerdict(true), 1000)
       }
+    }
 
-      setScores(newScores)
-
-      // Determine winner
-      const maxScore = Math.max(newScores.groq, newScores.openai, newScores.anthropic)
-      const winnerKey = Object.entries(newScores).find(([_, score]) => score === maxScore)?.[0]
-      setWinner(winnerKey || "groq")
-
-      setTimeout(() => setShowVerdict(true), 1000)
-    }, 2000)
-  }, [])
+    // Add delay to simulate deliberation
+    setTimeout(callJudgeAPI, 2000)
+  }, [pitches, concept, userGroup])
 
   const getModelName = (key: string) => {
     switch (key) {
@@ -107,9 +163,13 @@ export function JudgeVerdict({ pitches, onReset }: JudgeVerdictProps) {
             pitch!
           </div>
           <div className="text-sm text-gray-400 max-w-2xl mx-auto">
-            The winning pitch demonstrated superior market understanding, clear monetization strategy, and compelling
-            value proposition for the target audience.
+            {reasoning || "The winning pitch demonstrated superior market understanding, clear monetization strategy, and compelling value proposition for the target audience."}
           </div>
+          {error && (
+            <div className="text-xs text-red-400 mt-2">
+              ⚠️ {error}
+            </div>
+          )}
 
           <Button
             onClick={onReset}

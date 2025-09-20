@@ -197,10 +197,15 @@ REQUIRED OUTPUT FORMAT (valid JSON only):
     "anthropic": [1-10 integer]
   },
   "winner": "[groq|openai|anthropic]",
-  "reasoning": "[2-3 sentences explaining why the winner stood out in terms of market understanding, innovation, or execution strategy]"
+  "reasoning": "[Provide a comprehensive 1-paragraph analysis (4-6 sentences) that: 1) Briefly summarizes the key strengths and weaknesses of each pitch, 2) Explicitly contrasts their different approaches to market positioning, solution design, or go-to-market strategy, 3) Clearly explains why the winning pitch was superior - was it more realistic market analysis, better monetization strategy, stronger competitive advantage, or more compelling execution plan? 4) Mention specific elements from the pitches that influenced your decision.]"
 }
 
-Evaluate objectively based on startup fundamentals, not model preferences. The winner should be the pitch you'd most likely recommend for seed funding.`;
+ANALYSIS REQUIREMENTS:
+- Compare all three pitches directly against each other
+- Identify what made the winner stand out from the other two
+- Be specific about strengths/weaknesses rather than generic
+- Focus on fundability from a VC perspective
+- Evaluate objectively based on startup fundamentals, not model preferences`;
 };
 
 /**

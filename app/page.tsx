@@ -96,6 +96,8 @@ export default function HomePage() {
             <JudgeVerdict
               key={`${appState.concept}-${appState.userGroup}-verdict`}
               pitches={appState.pitches}
+              concept={appState.concept}
+              userGroup={appState.userGroup}
               onReset={handleReset}
             />
           </div>
