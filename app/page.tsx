@@ -61,6 +61,11 @@ export default function HomePage() {
             AI STARTUP BATTLE
           </h1>
           <p className="text-xl text-gray-300 mt-2">Where Silicon Valley meets Vegas</p>
+          <div className="mt-4">
+            <a href="/streaming-demo" className="text-cyan-400 hover:text-cyan-300 transition-colors">
+              View Streaming Demo
+            </a>
+          </div>
         </header>
 
         {/* Spinning Wheels Section */}
