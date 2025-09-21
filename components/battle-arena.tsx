@@ -25,7 +25,7 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
   })
   
   const abortControllersRef = useRef<Map<AIProvider, AbortController>>(new Map())
-
+  const completionCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Stream content from API
   const streamPitch = useCallback(async (provider: AIProvider, retryCount = 0) => {
@@ -97,7 +97,7 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
               }
             }))
             
-            setTimeout(checkAllComplete, 100)
+            debouncedCheckAllComplete()
           }
         }, provider === "groq" ? 50 : provider === "openai" ? 80 : 100)
         
@@ -112,19 +112,27 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let accumulatedContent = ""
-      let updateCounter = 0
-      let groqStreamFinished = false
+      let updateQueue = ""
+      let isUpdating = false
 
-      // Debounced update function to reduce UI twitching
-      const updateUI = () => {
-        setPitches(prev => ({
-          ...prev,
-          [provider]: {
-            ...prev[provider],
-            content: accumulatedContent,
-            isRetrying: false
-          }
-        }))
+      // Smooth micro-batching with requestAnimationFrame
+      const scheduleUpdate = () => {
+        if (!isUpdating && updateQueue) {
+          isUpdating = true
+          requestAnimationFrame(() => {
+            accumulatedContent += updateQueue
+            updateQueue = ""
+            setPitches(prev => ({
+              ...prev,
+              [provider]: {
+                ...prev[provider],
+                content: accumulatedContent,
+                isRetrying: false
+              }
+            }))
+            isUpdating = false
+          })
+        }
       }
 
       while (true) {
@@ -140,48 +148,44 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               try {
-                const jsonStr = line.slice(6).trim() // Remove 'data: ' prefix and trim
-                if (jsonStr && jsonStr !== '') {
+                const jsonStr = line.slice(6).trim()
+                if (jsonStr && jsonStr !== '' && jsonStr !== '[DONE]') {
                   const data = JSON.parse(jsonStr)
                   if (data.type === 'text' && data.content) {
-                    accumulatedContent += data.content
+                    updateQueue += data.content
                   } else if (data.type === 'done') {
-                    // Mark stream as finished; break out and allow finalization below
-                    groqStreamFinished = true
                     break
-                  } else if (data.type === 'error') {
-                    throw new Error(data.error || 'Streaming error')
                   }
                 }
               } catch (parseError) {
-                // If JSON parsing fails, treat as raw text (fallback)
-                console.warn('Failed to parse SSE chunk, treating as raw text:', line.slice(6))
-                const rawContent = line.slice(6).trim()
-                if (rawContent && !rawContent.startsWith('{')) {
-                  accumulatedContent += rawContent
-                }
+                // Skip invalid JSON lines
+                console.warn('Failed to parse SSE chunk:', line.slice(6))
               }
             }
           }
-          if (groqStreamFinished) {
-            break
-          }
         } else {
-          // For OpenAI and Anthropic - treat as raw text stream
-          accumulatedContent += chunk
+          // For OpenAI and Anthropic - direct text stream
+          updateQueue += chunk
         }
         
-        // Update UI every 5 chunks or every 100ms to reduce twitching
-        updateCounter++
-        if (updateCounter % 5 === 0) {
-          updateUI()
-          // Small delay to prevent overwhelming the UI thread
-          await new Promise(resolve => setTimeout(resolve, 16)) // ~60fps
+        // Micro-batch updates for smooth streaming (small frequent updates)
+        if (updateQueue.length >= 5) { // Update every 5 characters for smooth typing effect
+          scheduleUpdate()
         }
       }
 
       // Final update to ensure all content is displayed
-      updateUI()
+      if (updateQueue) {
+        accumulatedContent += updateQueue
+        setPitches(prev => ({
+          ...prev,
+          [provider]: {
+            ...prev[provider],
+            content: accumulatedContent,
+            isRetrying: false
+          }
+        }))
+      }
 
       // Mark as complete
       setPitches(prev => ({
@@ -193,8 +197,8 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
         }
       }))
 
-      // Check if all done (will be called via useEffect when state updates)
-      setTimeout(checkAllComplete, 100)
+      // Check if all done with debouncing
+      debouncedCheckAllComplete()
 
     } catch (error: any) {
       console.error(`Error generating pitch for ${provider}:`, error)
@@ -238,40 +242,53 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
           }
         }))
         
-        setTimeout(checkAllComplete, 100)
+        debouncedCheckAllComplete()
       }
     }
   }, [concept, userGroup])
 
-  // Check if all pitches are complete and send immediately
+  // Check if all pitches are complete using current state
   const checkAllComplete = useCallback(() => {
-    if (!readonly) {
-      const currentPitches = pitches
+    if (readonly) return
+    
+    setPitches(currentPitches => {
       const allComplete = currentPitches.groq.isComplete && 
                          currentPitches.openai.isComplete && 
                          currentPitches.anthropic.isComplete
       
-      // More robust content validation - check for meaningful pitch content
-      const hasRealContent = (content: string) => {
-        return content.length > 200 && // At least 200 chars
-               content.includes('**') && // Has formatting 
-               (content.includes('Problem') || content.includes('Solution') || content.includes('Market')) // Has pitch sections
+      // Simplified content validation - just check for reasonable content length
+      const hasValidContent = (content: string) => {
+        return content.trim().length > 50 // At least 50 characters of actual content
       }
       
-      const allHaveRealContent = hasRealContent(currentPitches.groq.content) && 
-                                hasRealContent(currentPitches.openai.content) && 
-                                hasRealContent(currentPitches.anthropic.content)
+      const allHaveContent = hasValidContent(currentPitches.groq.content) && 
+                            hasValidContent(currentPitches.openai.content) && 
+                            hasValidContent(currentPitches.anthropic.content)
       
-      if (allComplete && allHaveRealContent) {
+      if (allComplete && allHaveContent) {
         const finalPitches = {
           groq: currentPitches.groq.content,
           openai: currentPitches.openai.content,
           anthropic: currentPitches.anthropic.content,
         }
-        onPitchesComplete(finalPitches)
+        // Use setTimeout to avoid calling during render
+        setTimeout(() => onPitchesComplete(finalPitches), 0)
       }
+      
+      // Return unchanged state
+      return currentPitches
+    })
+  }, [onPitchesComplete, readonly])
+
+  // Debounced completion check to prevent race conditions
+  const debouncedCheckAllComplete = useCallback(() => {
+    if (completionCheckTimeoutRef.current) {
+      clearTimeout(completionCheckTimeoutRef.current)
     }
-  }, [pitches, onPitchesComplete, readonly])
+    completionCheckTimeoutRef.current = setTimeout(() => {
+      checkAllComplete()
+    }, 100)
+  }, [checkAllComplete])
 
   // Manual retry function
   const retryPitch = useCallback((provider: AIProvider) => {
@@ -285,6 +302,11 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
         controller.abort()
       })
       abortControllersRef.current.clear()
+      
+      // Clean up completion check timeout
+      if (completionCheckTimeoutRef.current) {
+        clearTimeout(completionCheckTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -327,6 +349,11 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
         controller.abort()
       })
       abortControllersRef.current.clear()
+      
+      // Clean up completion check timeout
+      if (completionCheckTimeoutRef.current) {
+        clearTimeout(completionCheckTimeoutRef.current)
+      }
     }
   }, [readonly, concept, userGroup, streamPitch])
 
@@ -347,7 +374,7 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
         {aiModels.map(({ key, name, color, icon }) => (
-          <Card key={key} className={`bg-black/40 backdrop-blur-sm border-${color}-400/50 p-6 overflow-hidden`}>
+          <Card key={key} className={`bg-black/40 backdrop-blur-sm border-${color}-400/50 p-6 overflow-hidden flex flex-col`} style={{ minHeight: '500px' }}>
             {/* Header */}
             <div className={`flex items-center gap-3 mb-4 pb-3 border-b border-${color}-400/30`}>
               <span className="text-2xl">{icon}</span>
@@ -374,7 +401,16 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
             </div>
 
             {/* Content */}
-            <div className="text-sm text-gray-200 leading-relaxed overflow-y-auto max-h-80 transition-all duration-75 ease-out whitespace-pre-wrap break-words">
+            <div 
+              className="flex-1 text-sm text-gray-200 leading-relaxed overflow-y-auto p-2 border border-transparent" 
+              style={{ 
+                height: '320px', 
+                minHeight: '320px',
+                contain: 'layout style',
+                willChange: 'contents',
+                transform: 'translateZ(0)'
+              }}
+            >
               {pitches[key].error && !pitches[key].content ? (
                 <div className="text-red-400 text-center py-4">
                   <div className="mb-2">⚠️ Generation Failed</div>
@@ -389,9 +425,18 @@ export function BattleArena({ concept, userGroup, onPitchesComplete, readonly = 
                   </button>
                 </div>
               ) : pitches[key].content ? (
-                <div className="whitespace-pre-line">
+                <div 
+                  className="whitespace-pre-wrap break-words" 
+                  style={{ 
+                    wordBreak: 'break-word', 
+                    overflowWrap: 'break-word',
+                    lineHeight: '1.6',
+                    fontVariantLigatures: 'none',
+                    textRendering: 'optimizeSpeed'
+                  }}
+                >
                   {pitches[key].content}
-                  {!pitches[key].isComplete && <span className="animate-pulse">|</span>}
+                  {!pitches[key].isComplete && <span className="animate-pulse text-cyan-400 ml-1">|</span>}
                   {pitches[key].error && pitches[key].content && (
                     <div className="mt-2 text-xs text-yellow-400">
                       ⚠️ Using fallback content due to API error
